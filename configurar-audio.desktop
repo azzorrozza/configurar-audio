@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Configurar áudio P2
+Comment=Seleciona o fone e o microfone P2 e define os dispositivos físicos como padrão
+Exec=/home/alexsandrorozza/.local/bin/configurar-audio.sh
+Terminal=false
+StartupNotify=false
+X-GNOME-Autostart-enabled=true
+X-GNOME-Autostart-Delay=10
