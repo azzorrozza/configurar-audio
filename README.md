@@ -1,16 +1,18 @@
 Configuração de áudio — LMDE 7
-Fone e microfone P2 como únicos dispositivos de uso
+Fone e microfone P2 com EasyEffects
 
 Este procedimento configura automaticamente o áudio do LMDE 7 para utilizar o fone de ouvido P2 e o microfone do headset conectado à entrada P2.
 
-O objetivo é evitar o uso acidental de outros dispositivos durante chamadas, reuniões e videoconferências.
+O objetivo é evitar a utilização acidental do áudio HDMI, dos alto-falantes internos e do microfone interno durante chamadas, reuniões e videoconferências.
+
+A configuração foi preparada para reutilização após reinstalação do LMDE 7 na mesma máquina.
 
 1. Hardware identificado
 
 Configuração baseada no hardware desta máquina:
 
 Componente	Identificação
-Sistema	LMDE 7
+Sistema operacional	LMDE 7
 Servidor de áudio	PipeWire 1.4.2
 Compatibilidade	PulseAudio via PipeWire
 Placa HDMI	AMD/ATI — 03_00.1
@@ -19,23 +21,28 @@ Codec de áudio	Realtek ALC256
 Saída desejada	Fone de ouvido P2
 Entrada desejada	Microfone do headset P2
 Processamento	EasyEffects
-
-Identificadores de hardware:
-
+Identificadores das placas
 text
 alsa_card.pci-0000_03_00.1
 alsa_card.pci-0000_03_00.6
 
+Portas utilizadas
+Dispositivo	Identificador
+Microfone interno	analog-input-internal-mic
+Microfone P2	analog-input-headset-mic
+Alto-falantes internos	analog-output-speaker
+Fone P2	analog-output-headphones
 2. Objetivo da configuração
-Dispositivo	Configuração
+Dispositivo	Estado desejado
 Áudio HDMI	Desativado
 Alto-falantes internos	Não utilizados
 Microfone interno	Não utilizado
 Fone P2	Selecionado
 Microfone P2	Selecionado
-EasyEffects	Entrada e saída padrão
+EasyEffects Sink	Saída padrão
+EasyEffects Source	Entrada padrão
 
-Observação: a configuração seleciona as portas físicas desejadas e desativa o perfil HDMI. Ela não remove os drivers nem impede que um aplicativo altere manualmente o dispositivo selecionado.
+Importante: selecionar o microfone P2 não desativa fisicamente o microfone interno. O procedimento configura o headset como entrada padrão, mas aplicativos podem substituir essa seleção manualmente.
 
 3. Criar os diretórios
 
@@ -60,20 +67,27 @@ text
 Server Name: PulseAudio (on PipeWire 1.4.2)
 
 
-Conferir também as placas:
+Conferir as placas:
 
 bash
 pactl list short cards
 
 
-Saída esperada:
+Resultado esperado:
 
 text
 alsa_card.pci-0000_03_00.1
 alsa_card.pci-0000_03_00.6
 
 
-Importante: este procedimento foi preparado para a mesma máquina. Caso os identificadores sejam diferentes depois da reinstalação, revisar o script antes de executá-lo.
+Conferir também os dispositivos:
+
+bash
+pactl list short sinks
+pactl list short sources
+
+
+Importante: este procedimento utiliza os identificadores de hardware desta máquina. Se forem diferentes após a reinstalação, revisar o script antes de executá-lo.
 
 5. Criar o script de configuração
 
@@ -136,6 +150,7 @@ log() {
 }
 
 finalizar() {
+
     STATUS=$?
 
     trap - EXIT
@@ -149,8 +164,10 @@ finalizar() {
         cp "$LOG_FILE" "$ERROR_LOG"
 
         if command -v notify-send >/dev/null 2>&1; then
+
             notify-send "Configuração de áudio" \
                 "Falha na configuração. Consulte o log de erros."
+
         fi
 
     else
@@ -192,8 +209,10 @@ AUDIO_READY=false
 for i in {1..15}; do
 
     if pactl info >/dev/null 2>&1; then
+
         AUDIO_READY=true
         break
+
     fi
 
     sleep 1
@@ -201,8 +220,10 @@ for i in {1..15}; do
 done
 
 if [ "$AUDIO_READY" = false ]; then
+
     log "ERRO: servidor de áudio não disponível."
     exit 1
+
 fi
 
 log "Servidor de áudio disponível."
@@ -216,13 +237,17 @@ log "Verificando placas de áudio..."
 CARDS=$(pactl list short cards)
 
 if ! grep -Fq "$HDMI_CARD" <<< "$CARDS"; then
+
     log "ERRO: placa HDMI não encontrada."
     exit 1
+
 fi
 
 if ! grep -Fq "$ANALOG_CARD" <<< "$CARDS"; then
+
     log "ERRO: placa analógica não encontrada."
     exit 1
+
 fi
 
 log "Placas de áudio identificadas."
@@ -274,22 +299,58 @@ log "Microfone P2 selecionado."
 
 log "Validando portas selecionadas..."
 
-SINK_PORT=$(pactl get-sink-port "$ANALOG_SINK")
+SINK_PORT=$(pactl list sinks | awk \
+    -v name="$ANALOG_SINK" '
+    $1 == "Name:" {
+        found = ($2 == name)
+    }
+    found && $1 == "Active" && $2 == "Port:" {
+        print $3
+        exit
+    }
+')
 
-SOURCE_PORT=$(pactl get-source-port "$ANALOG_SOURCE")
+SOURCE_PORT=$(pactl list sources | awk \
+    -v name="$ANALOG_SOURCE" '
+    $1 == "Name:" {
+        found = ($2 == name)
+    }
+    found && $1 == "Active" && $2 == "Port:" {
+        print $3
+        exit
+    }
+')
+
+if [ -z "$SINK_PORT" ]; then
+
+    log "ERRO: não foi possível identificar a porta de saída."
+    exit 1
+
+fi
+
+if [ -z "$SOURCE_PORT" ]; then
+
+    log "ERRO: não foi possível identificar a porta de entrada."
+    exit 1
+
+fi
 
 log "Porta de saída: $SINK_PORT"
 
 log "Porta de entrada: $SOURCE_PORT"
 
 if [ "$SINK_PORT" != "$HEADPHONE_PORT" ]; then
+
     log "ERRO: fone P2 não está selecionado."
     exit 1
+
 fi
 
 if [ "$SOURCE_PORT" != "$HEADSET_MIC_PORT" ]; then
+
     log "ERRO: microfone P2 não está selecionado."
     exit 1
+
 fi
 
 log "Portas físicas validadas."
@@ -325,7 +386,9 @@ for i in {1..30}; do
     fi
 
     if [ "$EASY_SINK" = true ] && [ "$EASY_SOURCE" = true ]; then
+
         break
+
     fi
 
     sleep 1
@@ -337,13 +400,17 @@ done
 # ==========================================
 
 if [ "$EASY_SINK" = false ]; then
+
     log "ERRO: easyeffects_sink não encontrado."
     exit 1
+
 fi
 
 if [ "$EASY_SOURCE" = false ]; then
+
     log "ERRO: easyeffects_source não encontrado."
     exit 1
+
 fi
 
 log "Dispositivos virtuais EasyEffects encontrados."
@@ -377,6 +444,9 @@ exit 0
 Salvar com CTRL + O, pressionar ENTER e sair com CTRL + X.
 
 6. Dar permissão de execução
+
+Executar:
+
 bash
 chmod +x ~/.local/bin/configurar-audio.sh
 
@@ -410,31 +480,28 @@ bash
 chmod +x ~/.config/autostart/configurar-audio.desktop
 
 
-Observação: o caminho do Exec utiliza o usuário atual desta máquina. Se o nome do usuário mudar em outra instalação, atualizar esse caminho.
+Observação: o caminho do Exec utiliza o usuário alexsandrorozza. Se o nome do usuário mudar em outra instalação, atualizar esse caminho.
 
-O script também possui suas próprias esperas, portanto não depende exclusivamente do atraso configurado no arquivo .desktop.
+O atraso de inicialização é uma extensão do ambiente GNOME. O script possui suas próprias esperas e não depende exclusivamente desse parâmetro.
 
 8. Configurar o EasyEffects
 
-O script configura os dispositivos virtuais do EasyEffects como dispositivos padrão, mas é necessário configurar o roteamento interno do programa.
+Abrir o EasyEffects e conferir as configurações internas.
 
-Abrir o EasyEffects e verificar:
-
-Saída (Output):
-
-Dispositivo de saída: áudio analógico Realtek.
-Saída física: fone P2.
+Saída (Output)
+Dispositivo físico de saída: áudio analógico Realtek.
+Saída: fone de ouvido P2.
 Manter os efeitos de processamento desejados.
-
-Entrada (Input):
-
-Dispositivo de entrada: microfone do headset P2.
+Entrada (Input)
+Dispositivo físico de entrada: microfone do headset P2.
 Confirmar que o microfone interno não está sendo utilizado.
 Manter os efeitos de processamento desejados.
 
-Importante: os dispositivos virtuais do EasyEffects não garantem, sozinhos, o roteamento correto. Essa configuração precisa ser conferida na interface do programa.
+Importante: o script define os dispositivos virtuais do EasyEffects como padrão, mas não configura automaticamente o roteamento interno do programa.
 
-Também é necessário garantir que o EasyEffects seja iniciado automaticamente no ambiente gráfico.
+É necessário garantir que o EasyEffects esteja iniciado e configurado para utilizar os dispositivos físicos corretos.
+
+Também é necessário habilitar sua inicialização automática, caso ainda não esteja configurada.
 
 9. Testar manualmente
 
@@ -455,10 +522,15 @@ Se houver erros:
 bash
 cat ~/configurar-audio-erro.log
 
+
+O resultado esperado no final do log é:
+
+text
+CONFIGURAÇÃO DE ÁUDIO CONCLUÍDA.
+CONFIGURAÇÃO CONCLUÍDA COM SUCESSO.
+
 10. Conferir os dispositivos após a configuração
-
-Servidor de áudio:
-
+Servidor de áudio
 bash
 pactl info
 
@@ -466,57 +538,54 @@ pactl info
 Esperado:
 
 text
-Server Name: PulseAudio (on PipeWire 1.4.2)
 Default Sink: easyeffects_sink
 Default Source: easyeffects_source
 
-
-Placas:
-
+Placas
 bash
 pactl list short cards
 
-
-Saídas:
-
+Saídas
 bash
 pactl list short sinks
 
-
-Entradas:
-
+Entradas
 bash
 pactl list short sources
 
-
-Porta física de saída:
-
+Porta física de saída
 bash
-pactl get-sink-port \
-alsa_output.pci-0000_03_00.6.analog-stereo
+pactl list sinks
 
 
-Esperado:
+Localizar a saída:
 
 text
-analog-output-headphones
+Name: alsa_output.pci-0000_03_00.6.analog-stereo
 
 
-Porta física de entrada:
-
-bash
-pactl get-source-port \
-alsa_input.pci-0000_03_00.6.analog-stereo
-
-
-Esperado:
+Conferir:
 
 text
-analog-input-headset-mic
+Active Port: analog-output-headphones
+
+Porta física de entrada
+bash
+pactl list sources
 
 
-Perfil HDMI:
+Localizar a entrada:
 
+text
+Name: alsa_input.pci-0000_03_00.6.analog-stereo
+
+
+Conferir:
+
+text
+Active Port: analog-input-headset-mic
+
+Perfil HDMI
 bash
 pactl list cards
 
@@ -546,14 +615,15 @@ Conferir se os aplicativos estão utilizando os dispositivos virtuais do EasyEff
 
 Nos aplicativos de chamada, selecionar explicitamente:
 
-Microfone: EasyEffects Source.
-Alto-falante: EasyEffects Sink.
+Configuração	Dispositivo
+Microfone	EasyEffects Source
+Alto-falante	EasyEffects Sink
 
-Os nomes podem aparecer com pequenas variações conforme a versão e o idioma dos aplicativos.
+Os nomes podem variar conforme a versão e o idioma dos aplicativos.
 
 12. Localização dos arquivos
 
-Ao finalizar, a estrutura será:
+Após a instalação, a estrutura será:
 
 text
 /home/alexsandrorozza/
@@ -572,10 +642,9 @@ text
 └── configurar-audio-erro.log
 
 
-O arquivo de erros só será mantido quando ocorrer uma falha na execução.
+O arquivo de erros será criado somente quando houver falha na execução.
 
 13. Solução de problemas
-
 EasyEffects não encontrado
 
 Verificar:
@@ -596,7 +665,6 @@ pactl set-sink-port \
 alsa_output.pci-0000_03_00.6.analog-stereo \
 analog-output-headphones
 
-
 Microfone P2 não selecionado
 
 Executar:
@@ -606,7 +674,6 @@ pactl set-source-port \
 alsa_input.pci-0000_03_00.6.analog-stereo \
 analog-input-headset-mic
 
-
 HDMI voltou a ficar ativo
 
 Executar:
@@ -615,9 +682,7 @@ bash
 pactl set-card-profile \
 alsa_card.pci-0000_03_00.1 off
 
-
 Consultar os logs
-
 bash
 cat ~/Documentos/configurar-audio.log
 
@@ -626,9 +691,9 @@ cat ~/configurar-audio-erro.log
 
 14. Resultado esperado
 
-Ao concluir o procedimento, a configuração deverá permanecer:
+Ao concluir o procedimento:
 
-Dispositivo	Estado esperado
+Dispositivo	Estado
 HDMI	Desativado
 Alto-falantes internos	Não utilizados
 Microfone interno	Não utilizado
@@ -637,6 +702,12 @@ Microfone P2	Entrada selecionada
 EasyEffects Sink	Saída padrão
 EasyEffects Source	Entrada padrão
 
-Observação final: este procedimento configura o roteamento padrão do áudio no LMDE 7. Aplicativos podem manter dispositivos próprios ou substituir a seleção padrão. Por isso, é importante conferir a entrada e a saída nas configurações dos programas de chamada.
+Observação final: o procedimento configura o roteamento padrão de áudio no LMDE 7. Aplicativos podem manter dispositivos próprios ou substituir a seleção padrão. Por isso, é importante conferir a entrada e a saída nas configurações dos programas de chamada.
 
-Objetivo: manter o uso do headset P2 como padrão, evitando confusão entre o áudio HDMI, os alto-falantes internos e o microfone interno durante chamadas.
+Objetivo final: manter o headset P2 como padrão, evitando confusão entre o áudio HDMI, os alto-falantes internos e o microfone interno durante chamadas e videoconferências.
+
+Sistema documentado: LMDE 7
+Servidor de áudio: PipeWire 1.4.2
+Codec: Realtek ALC256
+Processamento: EasyEffects
+Configuração: Fone e microfone P2
